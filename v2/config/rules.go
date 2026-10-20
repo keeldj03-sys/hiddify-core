@@ -1,96 +1,160 @@
 package config
 
-// import (
-// 	"strconv"
-// 	"strings"
+import (
+	"strings"
 
-// 	"github.com/sagernet/sing-box/option"
-// )
+	C "github.com/sagernet/sing-box/constant"
+	"github.com/sagernet/sing-box/option"
+	dns "github.com/sagernet/sing-dns"
+)
 
-// type Rule struct {
-// 	RuleSetUrl string `json:"rule-set-url"`
-// 	Domains    string `json:"domains"`
-// 	IP         string `json:"ip"`
-// 	Port       string `json:"port"`
-// 	Network    string `json:"network"`
-// 	Protocol   string `json:"protocol"`
-// 	Outbound   string `json:"outbound"`
-// }
+// Rule-set sources. The Hiddify repository hosts block lists and per-country
+// sets; SagerNet repositories are the fallback for arbitrary geosite-/geoip-
+// tags (e.g. geosite-telegram).
+const (
+	hiddifyGeoBase  = "https://raw.githubusercontent.com/hiddify/hiddify-geo/rule-set/"
+	singGeositeBase = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/"
+	singGeoipBase   = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/"
+)
 
-// func (r *Rule) MakeRule() option.DefaultRule {
-// 	rule := option.DefaultRule{}
-// 	if len(r.Domains) > 0 {
-// 		rule = makeDomainRule(rule, strings.Split(r.Domains, ","))
-// 	}
-// 	if len(r.IP) > 0 {
-// 		rule = makeIpRule(rule, strings.Split(r.IP, ","))
-// 	}
-// 	if len(r.Port) > 0 {
-// 		rule = makePortRule(rule, strings.Split(r.Port, ","))
-// 	}
-// 	if len(r.Network) > 0 {
-// 		rule.Network = append(rule.Network, r.Network)
-// 	}
-// 	if len(r.Protocol) > 0 {
-// 		rule.Protocol = append(rule.Protocol, strings.Split(r.Protocol, ",")...)
-// 	}
-// 	return rule
-// }
+// countries hosted at <hiddifyGeoBase>country/.
+var hiddifyGeoCountries = map[string]struct{}{
+	"af": {}, "br": {}, "cn": {}, "id": {}, "ir": {}, "ru": {}, "tr": {},
+}
 
-// func (r *Rule) MakeDNSRule() option.DefaultDNSRule {
-// 	rule := option.DefaultDNSRule{}
-// 	domains := strings.Split(r.Domains, ",")
-// 	for _, item := range domains {
-// 		if strings.HasPrefix(item, "geosite:") {
-// 			rule.Geosite = append(rule.Geosite, strings.TrimPrefix(item, "geosite:"))
-// 		} else if strings.HasPrefix(item, "full:") {
-// 			rule.Domain = append(rule.Domain, strings.ToLower(strings.TrimPrefix(item, "full:")))
-// 		} else if strings.HasPrefix(item, "domain:") {
-// 			rule.DomainSuffix = append(rule.DomainSuffix, strings.ToLower(strings.TrimPrefix(item, "domain:")))
-// 		} else if strings.HasPrefix(item, "regexp:") {
-// 			rule.DomainRegex = append(rule.DomainRegex, strings.ToLower(strings.TrimPrefix(item, "regexp:")))
-// 		} else if strings.HasPrefix(item, "keyword:") {
-// 			rule.DomainKeyword = append(rule.DomainKeyword, strings.ToLower(strings.TrimPrefix(item, "keyword:")))
-// 		}
-// 	}
-// 	return rule
-// }
+// blockTags hosted at <hiddifyGeoBase>block/.
+var hiddifyGeoBlockTags = map[string]struct{}{
+	"geosite-category-ads-all": {},
+	"geosite-malware":          {},
+	"geosite-phishing":         {},
+	"geosite-cryptominers":     {},
+	"geoip-malware":            {},
+	"geoip-phishing":           {},
+}
 
-// func makeDomainRule(options option.DefaultRule, list []string) option.DefaultRule {
-// 	for _, item := range list {
-// 		if strings.HasPrefix(item, "geosite:") {
-// 			options.Geosite = append(options.Geosite, strings.TrimPrefix(item, "geosite:"))
-// 		} else if strings.HasPrefix(item, "full:") {
-// 			options.Domain = append(options.Domain, strings.ToLower(strings.TrimPrefix(item, "full:")))
-// 		} else if strings.HasPrefix(item, "domain:") {
-// 			options.DomainSuffix = append(options.DomainSuffix, strings.ToLower(strings.TrimPrefix(item, "domain:")))
-// 		} else if strings.HasPrefix(item, "regexp:") {
-// 			options.DomainRegex = append(options.DomainRegex, strings.ToLower(strings.TrimPrefix(item, "regexp:")))
-// 		} else if strings.HasPrefix(item, "keyword:") {
-// 			options.DomainKeyword = append(options.DomainKeyword, strings.ToLower(strings.TrimPrefix(item, "keyword:")))
-// 		}
-// 	}
-// 	return options
-// }
+// ruleSetURL resolves a rule-set tag (as used in user routing rules) to a
+// remote .srs download URL. Returns ok=false for tags without a known
+// source; the caller must skip such tags instead of emitting a rule-set
+// reference that would fail to download.
+func ruleSetURL(tag string) (url string, ok bool) {
+	if strings.HasPrefix(tag, "http://") || strings.HasPrefix(tag, "https://") {
+		return tag, true
+	}
+	if _, ok := hiddifyGeoBlockTags[tag]; ok {
+		return hiddifyGeoBase + "block/" + tag + ".srs", true
+	}
+	if strings.HasPrefix(tag, "geosite-") {
+		if _, ok := hiddifyGeoCountries[strings.TrimPrefix(tag, "geosite-")]; ok {
+			return hiddifyGeoBase + "country/" + tag + ".srs", true
+		}
+		return singGeositeBase + tag + ".srs", true
+	}
+	if strings.HasPrefix(tag, "geoip-") {
+		if _, ok := hiddifyGeoCountries[strings.TrimPrefix(tag, "geoip-")]; ok {
+			return hiddifyGeoBase + "country/" + tag + ".srs", true
+		}
+		return singGeoipBase + tag + ".srs", true
+	}
+	return "", false
+}
 
-// func makeIpRule(options option.DefaultRule, list []string) option.DefaultRule {
-// 	for _, item := range list {
-// 		if strings.HasPrefix(item, "geoip:") {
-// 			options.GeoIP = append(options.GeoIP, strings.TrimPrefix(item, "geoip:"))
-// 		} else {
-// 			options.IPCIDR = append(options.IPCIDR, item)
-// 		}
-// 	}
-// 	return options
-// }
+// MakeRouteRule converts a user routing rule (protobuf Rule) into a sing-box
+// route rule. tags is the list of rule-set tags to reference, already
+// validated (resolvable to a remote .srs URL) by the caller.
+func (r *Rule) MakeRouteRule(tags []string) (rule option.Rule, ok bool) {
+	raw := option.RawDefaultRule{
+		Domain:          r.Domains,
+		DomainSuffix:    r.DomainSuffixes,
+		DomainKeyword:   r.DomainKeywords,
+		DomainRegex:     r.DomainRegexes,
+		IPCIDR:          r.IpCidrs,
+		SourceIPCIDR:    r.SourceIpCidrs,
+		PortRange:       r.PortRanges,
+		SourcePortRange: r.SourcePortRanges,
+		ProcessName:     r.ProcessNames,
+		ProcessPath:     r.ProcessPaths,
+		PackageName:     r.PackageNames,
+	}
+	if r.Network != Network_all {
+		raw.Network = []string{r.Network.String()}
+	}
+	if len(r.Protocols) > 0 {
+		raw.Protocol = make([]string, 0, len(r.Protocols))
+		for _, p := range r.Protocols {
+			raw.Protocol = append(raw.Protocol, p.String())
+		}
+	}
+	if len(tags) == 0 {
+		probe := option.DefaultRule{RawDefaultRule: raw}
+		if !probe.IsValid() {
+			return option.Rule{}, false
+		}
+	}
+	raw.RuleSet = tags
 
-// func makePortRule(options option.DefaultRule, list []string) option.DefaultRule {
-// 	for _, item := range list {
-// 		if strings.Contains(item, ":") {
-// 			options.PortRange = append(options.PortRange, item)
-// 		} else if i, err := strconv.Atoi(item); err == nil {
-// 			options.Port = append(options.Port, uint16(i))
-// 		}
-// 	}
-// 	return options
-// }
+	action := option.RuleAction{Action: C.RuleActionTypeRoute}
+	switch r.Outbound {
+	case Outbound_direct_with_fragment:
+		action.RouteOptions = option.RouteActionOptions{Outbound: OutboundDirectFragmentTag}
+	case Outbound_direct:
+		action.RouteOptions = option.RouteActionOptions{Outbound: OutboundDirectTag}
+	case Outbound_block:
+		action = option.RuleAction{
+			Action:        C.RuleActionTypeReject,
+			RejectOptions: option.RejectActionOptions{Method: C.RuleActionRejectMethodDefault},
+		}
+	default: // proxy
+		action.RouteOptions = option.RouteActionOptions{Outbound: OutboundMainDetour}
+	}
+
+	return option.Rule{
+		Type:           C.RuleTypeDefault,
+		DefaultOptions: option.DefaultRule{RawDefaultRule: raw, RuleAction: action},
+	}, true
+}
+
+// MakeDNSRule mirrors a user routing rule into a DNS rule, so that DNS
+// resolution follows the same routing decision (direct/blocked/proxied).
+func (r *Rule) MakeDNSRule(tags []string) (rule option.DefaultDNSRule, ok bool) {
+	raw := option.RawDefaultDNSRule{
+		Domain:          r.Domains,
+		DomainSuffix:    r.DomainSuffixes,
+		DomainKeyword:   r.DomainKeywords,
+		DomainRegex:     r.DomainRegexes,
+		IPCIDR:          r.IpCidrs,
+		SourceIPCIDR:    r.SourceIpCidrs,
+		PortRange:       r.PortRanges,
+		SourcePortRange: r.SourcePortRanges,
+		ProcessName:     r.ProcessNames,
+		ProcessPath:     r.ProcessPaths,
+		PackageName:     r.PackageNames,
+	}
+	if r.Network != Network_all {
+		raw.Network = []string{r.Network.String()}
+	}
+	if len(tags) == 0 {
+		probe := option.DefaultDNSRule{RawDefaultDNSRule: raw}
+		if !probe.IsValid() {
+			return option.DefaultDNSRule{}, false
+		}
+	}
+	raw.RuleSet = tags
+
+	action := option.DNSRuleAction{Action: C.RuleActionTypeRoute}
+	switch r.Outbound {
+	case Outbound_direct, Outbound_direct_with_fragment:
+		action.RouteOptions = option.DNSRouteActionOptions{Server: DNSMultiDirectTag}
+	case Outbound_block:
+		rcode := option.DNSRCode(dns.RCodeRefused)
+		action = option.DNSRuleAction{
+			Action: C.RuleActionTypePredefined,
+			PredefinedOptions: option.DNSRouteActionPredefined{
+				Rcode: &rcode,
+			},
+		}
+	default: // proxy
+		action.RouteOptions = option.DNSRouteActionOptions{Server: DNSMultiRemoteTag}
+	}
+
+	return option.DefaultDNSRule{RawDefaultDNSRule: raw, DNSRuleAction: action}, true
+}

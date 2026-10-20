@@ -1,6 +1,8 @@
 [submodule "hiddify-sing-box"]
 	path = hiddify-sing-box
-	url = https://github.com/hiddify/hiddify-sing-box
+	url = https://github.com/keeldj03-sys/hiddify-sing-box.git
+	branch = feature/nerpa-core-compat
 [submodule "ray2sing"]
 	path = ray2sing
-	url = git@github.com:hiddify/ray2sing.git
+	url = https://github.com/keeldj03-sys/ray2sing.git
+	branch = feature/nerpa-placeholder-filter

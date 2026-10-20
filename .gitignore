@@ -16,3 +16,6 @@ data
 node_modules
 *.db
 *.json
+/b2check/
+/rulescheck/
+

@@ -13,6 +13,7 @@ import (
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -145,13 +146,17 @@ func (h *HiddifyInstance) GetAllProxiesInfo(hismap map[string]*adapter.URLTestHi
 			if onlyGroupitems && itemTag != selectedTag {
 				continue
 			}
-			pinfo := outbounds_converted[itemTag]
+			// clone the shared proto: the same node belongs to several groups
+			// (select/balance/lowest), and each group has its own selected
+			// flag. Writing it into the shared pointer would let the last
+			// group (e.g. the "lowest" urltest) overwrite the selector's pick.
+			pinfo := proto.Clone(outbounds_converted[itemTag]).(*OutboundInfo)
 			pinfo.IsSelected = itemTag == selectedTag
 			if onlyGroupitems && pinfo.GroupSelectedTagDisplay != nil && pinfo.TagDisplay != *pinfo.GroupSelectedTagDisplay {
 				pinfo.TagDisplay = pinfo.TagDisplay + " → " + *pinfo.GroupSelectedTagDisplay
 			}
-			group.Items = append(group.Items, pinfo)
 			pinfo.IsVisible = !strings.Contains(itemTag, "§hide§")
+			group.Items = append(group.Items, pinfo)
 
 		}
 		if len(group.Items) == 0 {

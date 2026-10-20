@@ -128,6 +128,17 @@ func getHostnameIfNotIP(inp string) (string, error) {
 }
 
 func setOutbounds(options *option.Options, input *option.Options, opt *HiddifyOptions, staticIPs *map[string][]string) error {
+	// balancer strategy default: round-robin. sing-box rejects an empty
+	// strategy with "unknown load balance strategy", which breaks startup
+	// when the app does not set balancer-strategy.
+	balancerStrategy := func(setting string) string {
+		switch setting {
+		case "round-robin", "consistent-hashing", "sticky-sessions", "lowest-delay":
+			return setting
+		default:
+			return "round-robin"
+		}
+	}
 	var outbounds []option.Outbound
 	var endpoints []option.Endpoint
 	var tags []string
@@ -288,7 +299,7 @@ func setOutbounds(options *option.Options, input *option.Options, opt *HiddifyOp
 		Tag:  OutboundRoundRobinTag,
 		Options: &option.BalancerOutboundOptions{
 			Outbounds:            tags,
-			Strategy:             opt.BalancerStrategy,
+			Strategy:             balancerStrategy(opt.BalancerStrategy),
 			DelayAcceptableRatio: 2,
 			// URL:       opt.ConnectionTestUrl,
 			// URLs:      opt.ConnectionTestUrls,
@@ -346,6 +357,9 @@ func setOutbounds(options *option.Options, input *option.Options, opt *HiddifyOp
 				Options: &option.DirectOutboundOptions{
 					DialerOptions: option.DialerOptions{
 						TCPFastOpen: false,
+						// a non-default value keeps this outbound from being treated as
+						// an "empty direct" one, which sing-box rejects as a DNS detour
+						FallbackDelay: badoption.Duration(300 * time.Millisecond),
 
 						// TLSFragment: option.TLSFragmentOptions{
 						// 	Enabled: true,
@@ -685,45 +699,51 @@ func setRoutingOptions(options *option.Options, hopt *HiddifyOptions) error {
 		)
 	}
 
-	// for _, rule := range opt.Rules {
-	// 	routeRule := rule.MakeRule()
-	// 	switch rule.Outbound {
-	// 	case "bypass":
-	// 		routeRule.Outbound = OutboundBypassTag
-	// 	case "block":
-	// 		routeRule.Outbound = OutboundBlockTag
-	// 	case "proxy":
-	// 		routeRule.Outbound = OutboundMainProxyTag
-	// 	}
+	// User-defined routing rules (from route_rule.proto / routing presets).
+	// Disabled and empty rules are skipped; rule-set tags that cannot be
+	// resolved to a remote .srs URL are dropped (a bad URL would fail the
+	// whole config at startup).
+	userRuleSetTags := make(map[string]struct{})
+	for _, rule := range hopt.Rules {
+		if !rule.Enabled {
+			continue
+		}
+		tags := make([]string, 0, len(rule.RuleSets))
+		for _, tag := range rule.RuleSets {
+			if tag == "" {
+				continue
+			}
+			if _, ok := ruleSetURL(tag); !ok {
+				fmt.Printf("warning: skipping unknown rule-set tag %q (no source URL)\n", tag)
+				continue
+			}
+			tags = append(tags, tag)
+			userRuleSetTags[tag] = struct{}{}
+		}
+		if routeRule, ok := rule.MakeRouteRule(tags); ok {
+			routeRules = append(routeRules, routeRule)
+		}
+		if dnsRule, ok := rule.MakeDNSRule(tags); ok {
+			dnsRules = append(dnsRules, dnsRule)
+		}
+	}
+	for tag := range userRuleSetTags {
+		url, ok := ruleSetURL(tag)
+		if !ok {
+			continue
+		}
+		rulesets = append(rulesets, option.RuleSet{
+			Type:   C.RuleSetTypeRemote,
+			Tag:    tag,
+			Format: C.RuleSetFormatBinary,
+			RemoteOptions: option.RemoteRuleSet{
+				URL:            url,
+				UpdateInterval: badoption.Duration(5 * time.Hour * 24),
+				DownloadDetour: OutboundSelectTag,
+			},
+		})
+	}
 
-	// 	if routeRule.IsValid() {
-	// 		routeRules = append(
-	// 			routeRules,
-	// 			option.Rule{
-	// 				Type:           C.RuleTypeDefault,
-	// 				DefaultOptions: routeRule,
-	// 			},
-	// 		)
-	// 	}
-
-	// 	dnsRule := rule.MakeDNSRule()
-	// 	switch rule.Outbound {
-	// 	case "bypass":
-	// 		dnsRule.Server = DNSDirectTag
-	// 	case "block":
-	// 		dnsRule.Server = DNSBlockTag
-	// 		dnsRule.DisableCache = true
-	// 	case "proxy":
-	// 		if opt.EnableFakeDNS {
-	// 			fakeDnsRule := dnsRule
-	// 			fakeDnsRule.Server = DNSFakeTag
-	// 			fakeDnsRule.Inbound = []string{InboundTUNTag, InboundMixedTag}
-	// 			dnsRules = append(dnsRules, fakeDnsRule)
-	// 		}
-	// 		dnsRule.Server = DNSRemoteTag
-	// 	}
-	// 	dnsRules = append(dnsRules, dnsRule)
-	// }
 	forceDirectRoute := make([]string, 0)
 	if options.NTP != nil && options.NTP.Enabled {
 		forceDirectRoute = append(forceDirectRoute, options.NTP.Server)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/hiddify/hiddify-core/v2/config"
@@ -220,6 +221,7 @@ func (h *HiddifyInstance) SelectOutbound(in *SelectOutboundRequest) (*hcommon.Re
 	if box := h.Box(); box != nil {
 		outboundGroup, isLoaded := box.Outbound().Outbound(in.GroupTag)
 		if !isLoaded {
+			Log(LogLevel_ERROR, LogType_CORE, "select outbound: group not found: ", in.GroupTag)
 			return &hcommon.Response{
 				Code:    hcommon.ResponseCode_FAILED,
 				Message: E.New("selector not found: ", in.GroupTag).Error(),
@@ -227,17 +229,21 @@ func (h *HiddifyInstance) SelectOutbound(in *SelectOutboundRequest) (*hcommon.Re
 		}
 		selector, isSelector := outboundGroup.(*group.Selector)
 		if !isSelector {
+			Log(LogLevel_ERROR, LogType_CORE, "select outbound: not a selector: ", in.GroupTag, " type: ", outboundGroup.Type())
 			return &hcommon.Response{
 				Code:    hcommon.ResponseCode_FAILED,
 				Message: E.New("outbound is not a selector: ", in.GroupTag).Error(),
 			}, E.New("outbound is not a selector: ", in.GroupTag)
 		}
+		Log(LogLevel_INFO, LogType_CORE, "select outbound: selector before: ", selector.Now())
 		if !selector.SelectOutbound(in.OutboundTag) {
+			Log(LogLevel_ERROR, LogType_CORE, "select outbound: outbound not found in selector [", in.GroupTag, "]: ", in.OutboundTag, " all: ", strings.Join(selector.All(), ","))
 			return &hcommon.Response{
 				Code:    hcommon.ResponseCode_FAILED,
 				Message: E.New("outbound not found in selector:: ", in.GroupTag).Error(),
 			}, E.New("outbound not found in selector: ", in.GroupTag)
 		}
+		Log(LogLevel_INFO, LogType_CORE, "select outbound: selector now: ", selector.Now(), " (requested: ", in.OutboundTag, ")")
 		Log(LogLevel_DEBUG, LogType_CORE, "Trying to ping outbound: ", in.OutboundTag)
 
 		// if urltesHistory := h.UrlTestHistory(); urltesHistory != nil {

@@ -47,6 +47,35 @@ func (s *CoreService) Parse(ctx context.Context, in *ParseRequest) (*ParseRespon
 	return Parse(libbox.FromContext(ctx, nil), in)
 }
 
+// NormalizeRouteRuleKey moves the app's "route-rule" payload (a RouteRule
+// message serialized as {"rules": [...]}) to the top-level "rules" key
+// expected by config.HiddifyOptions. Returns the input unchanged if the
+// key is absent or the payload is not an object with "rules".
+func NormalizeRouteRuleKey(settingsJson string) string {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(settingsJson), &raw); err != nil {
+		// Not a JSON object: leave as-is, the caller below will report it.
+		return settingsJson
+	}
+	rr, ok := raw["route-rule"]
+	if !ok {
+		return settingsJson
+	}
+	var inner map[string]json.RawMessage
+	if err := json.Unmarshal(rr, &inner); err != nil {
+		return settingsJson
+	}
+	if rules, ok := inner["rules"]; ok {
+		raw["rules"] = rules
+	}
+	delete(raw, "route-rule")
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return settingsJson
+	}
+	return string(out)
+}
+
 func Parse(ctx context.Context, in *ParseRequest) (*ParseResponse, error) {
 	defer config.DeferPanicToError("parse", func(err error) {
 		Log(LogLevel_FATAL, LogType_CONFIG, err.Error())
@@ -110,6 +139,12 @@ func ChangeHiddifySettings(in *ChangeHiddifySettingsRequest, insert bool) (*Core
 	if in.HiddifySettingsJson == "" {
 		return &CoreInfoResponse{}, nil
 	}
+
+	// The app sends user routing rules under the "route-rule" key
+	// ({"rules": [...]}), while HiddifyOptions expects them at "rules".
+	// Normalize the payload before unmarshaling.
+	in.HiddifySettingsJson = NormalizeRouteRuleKey(in.HiddifySettingsJson)
+
 	if insert {
 		settings := db.GetTable[hcommon.AppSettings]()
 		settings.UpdateInsert(&hcommon.AppSettings{

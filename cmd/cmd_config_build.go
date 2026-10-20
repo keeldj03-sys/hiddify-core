@@ -115,6 +115,9 @@ func readHiddifyOptionsAt(path string) (*config.HiddifyOptions, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Accept the app's payload format: user routing rules arrive under
+	// the "route-rule" key instead of the top-level "rules" key.
+	content = []byte(hcore.NormalizeRouteRuleKey(string(content)))
 	var options config.HiddifyOptions
 	err = json.Unmarshal(content, &options)
 	if err != nil {
