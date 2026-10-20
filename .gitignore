@@ -19,3 +19,5 @@ node_modules
 /b2check/
 /rulescheck/
 
+
+Makefile.checktmp

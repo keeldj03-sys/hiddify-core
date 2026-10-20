@@ -41,6 +41,11 @@ lib_install: prepare
 	go install -v github.com/sagernet/gomobile/cmd/gobind@v0.1.11
 	npm install
 
+# gomobile and gobind land in the Go bin directory, which is not on the
+# PATH by default. Every recipe that calls them needs it.
+GO_BIN=$(shell go env GOPATH)/bin
+export PATH := $(GO_BIN):$(PATH)
+
 headers:
 	go build -buildmode=c-archive -o $(BINDIR)/ ./platform/desktop2
 
