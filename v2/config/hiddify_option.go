@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
-	dns "github.com/sagernet/sing-dns"
 )
 
 type HiddifyOptions struct {
@@ -23,17 +23,20 @@ type HiddifyOptions struct {
 	BalancerStrategy        string `json:"balancer-strategy,omitempty" overridable:"true"`
 	// GeoIPPath        string      `json:"geoip-path"`
 	// GeoSitePath      string      `json:"geosite-path"`
-	Rules     []Rule      `json:"rules,omitempty" overridable:"true"`
-	Warp      WarpOptions `json:"warp,omitempty"`
-	Warp2     WarpOptions `json:"warp2,omitempty"`
-	Mux       MuxOptions  `json:"mux,omitempty" overridable:"true"`
-	TLSTricks TLSTricks   `json:"tls-tricks,omitempty"`
-	EnableNTP bool        `json:"enable-ntp,omitempty"`
+	Rules []Rule `json:"rules,omitempty" overridable:"true"`
+	// the app's rule list; when set it replaces block-ads, bypass-lan and the region rules
+	RouteRule *RouteRuleOptions `json:"route-rule,omitempty"`
+	Warp      WarpOptions       `json:"warp,omitempty"`
+	Warp2     WarpOptions       `json:"warp2,omitempty"`
+	Mux       MuxOptions        `json:"mux,omitempty" overridable:"true"`
+	TLSTricks TLSTricks         `json:"tls-tricks,omitempty"`
+	EnableNTP bool              `json:"enable-ntp,omitempty"`
 
 	DNSOptions
 	InboundOptions
 	URLTestOptions
 	RouteOptions
+	ChainOptions
 }
 
 type DNSOptions struct {
@@ -110,9 +113,9 @@ func DefaultHiddifyOptions() *HiddifyOptions {
 		EnableNTP: true,
 		DNSOptions: DNSOptions{
 			RemoteDnsAddress:        "1.1.1.1",
-			RemoteDnsDomainStrategy: option.DomainStrategy(dns.DomainStrategyAsIS),
+			RemoteDnsDomainStrategy: option.DomainStrategy(C.DomainStrategyAsIS),
 			DirectDnsAddress:        "1.1.1.1",
-			DirectDnsDomainStrategy: option.DomainStrategy(dns.DomainStrategyAsIS),
+			DirectDnsDomainStrategy: option.DomainStrategy(C.DomainStrategyAsIS),
 			IndependentDNSCache:     false,
 			EnableFakeDNS:           false,
 			// EnableDNSRouting:        false,
@@ -135,7 +138,7 @@ func DefaultHiddifyOptions() *HiddifyOptions {
 		},
 		RouteOptions: RouteOptions{
 			ResolveDestination:     false,
-			IPv6Mode:               option.DomainStrategy(dns.DomainStrategyAsIS),
+			IPv6Mode:               option.DomainStrategy(C.DomainStrategyAsIS),
 			BypassLAN:              false,
 			AllowConnectionFromLAN: false,
 		},

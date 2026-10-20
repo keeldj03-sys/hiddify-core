@@ -179,6 +179,9 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           JAVA_HOME: /usr/lib/jvm/java-17-openjdk-amd64
+          # embedded at build time; the Psiphon config only in encrypted form (empty = not embedded)
+          HIDDIFY_SECRET_KEY: ${{ secrets.HIDDIFY_SECRET_KEY }}
+          PSIPHON_CONFIG: ${{ secrets.PSIPHON_CONFIG }}
 
       - name: zip
         run: |
@@ -229,7 +232,7 @@ jobs:
       CODE_VERSION: "-X github.com/hiddify/hiddify-core/v2/hcommon/constants.Version=${{ needs.calculate_version.outputs.hiddify_version }} -X github.com/sagernet/sing-box/constant.Version=${{ needs.calculate_version.outputs.singbox_version }}"
       
     strategy:
-      # fail-fast: false
+      fail-fast: false
       matrix:
         include:
           - { os: linux, arch: amd64, variant: purego, naive: true }
@@ -384,8 +387,10 @@ jobs:
       - name: Extract libcronet.so
         if: matrix.variant == 'purego' && matrix.naive
         run: |
-          cd ~/cronet-go
-          CGO_ENABLED=0 go run -v ./cmd/build-naive extract-lib --target ${{ matrix.os }}/${{ matrix.arch }} -o $GITHUB_WORKSPACE/dist
+          set -xeuo pipefail
+          # cronet-go ships the prebuilt library; its build-naive has no extract-lib command
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp ~/cronet-go/lib/${{ matrix.os }}_${{ matrix.arch }}/libcronet.so "$GITHUB_WORKSPACE/dist/"
       - name: Build (glibc)
         if: matrix.variant == 'glibc'
         run: |
@@ -601,7 +606,7 @@ jobs:
   upload-release:
     permissions: write-all
     if: ${{ inputs.channel=='prod' }}
-    needs: [build]
+    needs: [build,build-binary]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

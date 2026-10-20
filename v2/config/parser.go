@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/hiddify/ray2sing/ray2sing"
 	"github.com/sagernet/sing-box/experimental/libbox"
@@ -64,7 +65,8 @@ func parseConfigContent(ctx context.Context, content []byte, debug bool, configO
 		fmt.Printf("Convert using json\n")
 		if tmpJsonObj, ok := tmpJsonResult.(map[string]interface{}); ok {
 			if tmpJsonObj["outbounds"] == nil && tmpJsonObj["endpoints"] == nil {
-				jsonObj["outbounds"] = []interface{}{jsonObj}
+				// a single outbound object (was wrapping the empty result itself)
+				jsonObj["outbounds"] = []interface{}{tmpJsonObj}
 			} else {
 				if fullConfig || (configOpt != nil && configOpt.EnableFullConfig) {
 					jsonObj = tmpJsonObj
@@ -77,13 +79,35 @@ func parseConfigContent(ctx context.Context, content []byte, debug bool, configO
 					}
 				}
 			}
-		} else if jsonArray, ok := tmpJsonResult.([]map[string]interface{}); ok {
-			jsonObj["outbounds"] = jsonArray
+		} else if jsonArray, ok := tmpJsonResult.([]interface{}); ok {
+			if len(jsonArray) == 0 {
+				return nil, fmt.Errorf("[SingboxParser] no outbounds found")
+			}
+			outbounds := make([]interface{}, 0, len(jsonArray))
+			for i, item := range jsonArray {
+				itemObj, ok := item.(map[string]interface{})
+				if !ok {
+					return nil, fmt.Errorf("[SingboxParser] outbound at index %d is %T, expected a json object", i, item)
+				}
+				outbounds = append(outbounds, itemObj)
+			}
+			jsonObj["outbounds"] = outbounds
 		} else {
-			return nil, fmt.Errorf("[SingboxParser] Incorrect Json Format")
+			return nil, fmt.Errorf("[SingboxParser] incorrect json format: expected a json object or an array of outbound objects, got %T", tmpJsonResult)
 		}
 
-		newContent, _ := json.MarshalIndent(jsonObj, "", "  ")
+		// the legacy WireGuard outbound was removed from sing-box: use the WireGuard endpoint
+		outbounds, _ := jsonObj["outbounds"].([]interface{})
+		endpoints, _ := jsonObj["endpoints"].([]interface{})
+		if outbounds, endpoints = ray2sing.MoveLegacyWireGuardOutbounds(outbounds, endpoints); len(endpoints) > 0 {
+			jsonObj["outbounds"] = outbounds
+			jsonObj["endpoints"] = endpoints
+		}
+
+		newContent, err := json.MarshalIndent(jsonObj, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("[SingboxParser] %w", err)
+		}
 
 		return patchConfigStr(ctx, newContent, "SingboxParser", configOpt)
 	}
@@ -125,6 +149,8 @@ func patchConfigStr(ctx context.Context, content []byte, name string, configOpt 
 	return patchConfigOptions(ctx, &options, name, configOpt)
 }
 func patchConfigOptions(ctx context.Context, options *option.Options, name string, configOpt *HiddifyOptions) (*option.Options, error) {
+	// dns outbounds were removed in sing-box 1.13; drop them instead of keeping invalid placeholders
+	options.Outbounds = slices.DeleteFunc(options.Outbounds, isDNSOutbound)
 	b, _ := batch.New(ctx, batch.WithConcurrencyNum[*option.Endpoint](2))
 	for _, base := range options.Endpoints {
 		out := base

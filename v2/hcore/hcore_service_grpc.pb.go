@@ -32,6 +32,7 @@ const (
 	Core_StartService_FullMethodName          = "/hcore.Core/StartService"
 	Core_Stop_FullMethodName                  = "/hcore.Core/Stop"
 	Core_Restart_FullMethodName               = "/hcore.Core/Restart"
+	Core_HotReload_FullMethodName             = "/hcore.Core/HotReload"
 	Core_SelectOutbound_FullMethodName        = "/hcore.Core/SelectOutbound"
 	Core_UrlTest_FullMethodName               = "/hcore.Core/UrlTest"
 	Core_UrlTestActive_FullMethodName         = "/hcore.Core/UrlTestActive"
@@ -40,6 +41,7 @@ const (
 	Core_SetSystemProxyEnabled_FullMethodName = "/hcore.Core/SetSystemProxyEnabled"
 	Core_LogListener_FullMethodName           = "/hcore.Core/LogListener"
 	Core_Close_FullMethodName                 = "/hcore.Core/Close"
+	Core_GetLANIP_FullMethodName              = "/hcore.Core/GetLANIP"
 )
 
 // CoreClient is the client API for Core service.
@@ -59,6 +61,11 @@ type CoreClient interface {
 	StartService(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	Stop(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	Restart(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
+	// Apply the config to the running core without restarting it: outbounds, endpoints, inbounds
+	// (not TUN), DNS servers/rules/final and route rules/rule sets/final may change. Anything else,
+	// or a changed TUN inbound, returns HOT_RELOAD_FAILED and leaves the core running unchanged.
+	// When the core is stopped, it is started like Start.
+	HotReload(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error)
 	SelectOutbound(ctx context.Context, in *SelectOutboundRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	UrlTest(ctx context.Context, in *UrlTestRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	UrlTestActive(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*hcommon.Response, error)
@@ -67,6 +74,7 @@ type CoreClient interface {
 	SetSystemProxyEnabled(ctx context.Context, in *SetSystemProxyEnabledRequest, opts ...grpc.CallOption) (*hcommon.Response, error)
 	LogListener(ctx context.Context, in *LogRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogMessage], error)
 	Close(ctx context.Context, in *CloseRequest, opts ...grpc.CallOption) (*hcommon.Empty, error)
+	GetLANIP(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*LANIPResponse, error)
 }
 
 type coreClient struct {
@@ -233,6 +241,16 @@ func (c *coreClient) Restart(ctx context.Context, in *StartRequest, opts ...grpc
 	return out, nil
 }
 
+func (c *coreClient) HotReload(ctx context.Context, in *StartRequest, opts ...grpc.CallOption) (*CoreInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CoreInfoResponse)
+	err := c.cc.Invoke(ctx, Core_HotReload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *coreClient) SelectOutbound(ctx context.Context, in *SelectOutboundRequest, opts ...grpc.CallOption) (*hcommon.Response, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(hcommon.Response)
@@ -322,6 +340,16 @@ func (c *coreClient) Close(ctx context.Context, in *CloseRequest, opts ...grpc.C
 	return out, nil
 }
 
+func (c *coreClient) GetLANIP(ctx context.Context, in *hcommon.Empty, opts ...grpc.CallOption) (*LANIPResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LANIPResponse)
+	err := c.cc.Invoke(ctx, Core_GetLANIP_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CoreServer is the server API for Core service.
 // All implementations must embed UnimplementedCoreServer
 // for forward compatibility.
@@ -339,6 +367,11 @@ type CoreServer interface {
 	StartService(context.Context, *StartRequest) (*CoreInfoResponse, error)
 	Stop(context.Context, *hcommon.Empty) (*CoreInfoResponse, error)
 	Restart(context.Context, *StartRequest) (*CoreInfoResponse, error)
+	// Apply the config to the running core without restarting it: outbounds, endpoints, inbounds
+	// (not TUN), DNS servers/rules/final and route rules/rule sets/final may change. Anything else,
+	// or a changed TUN inbound, returns HOT_RELOAD_FAILED and leaves the core running unchanged.
+	// When the core is stopped, it is started like Start.
+	HotReload(context.Context, *StartRequest) (*CoreInfoResponse, error)
 	SelectOutbound(context.Context, *SelectOutboundRequest) (*hcommon.Response, error)
 	UrlTest(context.Context, *UrlTestRequest) (*hcommon.Response, error)
 	UrlTestActive(context.Context, *hcommon.Empty) (*hcommon.Response, error)
@@ -347,6 +380,7 @@ type CoreServer interface {
 	SetSystemProxyEnabled(context.Context, *SetSystemProxyEnabledRequest) (*hcommon.Response, error)
 	LogListener(*LogRequest, grpc.ServerStreamingServer[LogMessage]) error
 	Close(context.Context, *CloseRequest) (*hcommon.Empty, error)
+	GetLANIP(context.Context, *hcommon.Empty) (*LANIPResponse, error)
 	mustEmbedUnimplementedCoreServer()
 }
 
@@ -393,6 +427,9 @@ func (UnimplementedCoreServer) Stop(context.Context, *hcommon.Empty) (*CoreInfoR
 func (UnimplementedCoreServer) Restart(context.Context, *StartRequest) (*CoreInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Restart not implemented")
 }
+func (UnimplementedCoreServer) HotReload(context.Context, *StartRequest) (*CoreInfoResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HotReload not implemented")
+}
 func (UnimplementedCoreServer) SelectOutbound(context.Context, *SelectOutboundRequest) (*hcommon.Response, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SelectOutbound not implemented")
 }
@@ -416,6 +453,9 @@ func (UnimplementedCoreServer) LogListener(*LogRequest, grpc.ServerStreamingServ
 }
 func (UnimplementedCoreServer) Close(context.Context, *CloseRequest) (*hcommon.Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Close not implemented")
+}
+func (UnimplementedCoreServer) GetLANIP(context.Context, *hcommon.Empty) (*LANIPResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetLANIP not implemented")
 }
 func (UnimplementedCoreServer) mustEmbedUnimplementedCoreServer() {}
 func (UnimplementedCoreServer) testEmbeddedByValue()              {}
@@ -626,6 +666,24 @@ func _Core_Restart_Handler(srv interface{}, ctx context.Context, dec func(interf
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Core_HotReload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).HotReload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_HotReload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).HotReload(ctx, req.(*StartRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Core_SelectOutbound_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SelectOutboundRequest)
 	if err := dec(in); err != nil {
@@ -763,6 +821,24 @@ func _Core_Close_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Core_GetLANIP_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(hcommon.Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(CoreServer).GetLANIP(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Core_GetLANIP_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(CoreServer).GetLANIP(ctx, req.(*hcommon.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Core_ServiceDesc is the grpc.ServiceDesc for Core service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -803,6 +879,10 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Core_Restart_Handler,
 		},
 		{
+			MethodName: "HotReload",
+			Handler:    _Core_HotReload_Handler,
+		},
+		{
 			MethodName: "SelectOutbound",
 			Handler:    _Core_SelectOutbound_Handler,
 		},
@@ -829,6 +909,10 @@ var Core_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Close",
 			Handler:    _Core_Close_Handler,
+		},
+		{
+			MethodName: "GetLANIP",
+			Handler:    _Core_GetLANIP_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -11,11 +11,24 @@ ifeq ($(OS),Windows_NT)
 Not available for Windows! use bash in WSL
 endif
 CRONET_GO_VERSION := $(shell cat hiddify-sing-box/.github/CRONET_GO_VERSION)
-TAGS=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_naive_outbound,with_conntrack
+TAGS=with_gvisor,with_quic,with_wireguard,with_utls,with_clash_api,with_grpc,with_awg,tfogo_checklinkname0,with_naive_outbound,with_conntrack,with_embedded_tor,with_openvpn,with_openconnect
 IOS_ADD_TAGS=with_dhcp,with_low_memory,with_purego
 MACOS_ADD_TAGS=with_dhcp
 WINDOWS_ADD_TAGS=with_purego
-LDFLAGS=-w -s -checklinkname=0 -buildid= $${CODE_VERSION}
+# Optional build-time secrets (GitHub Actions): HIDDIFY_SECRET_KEY (base64 AES-256 key) is embedded,
+# and PSIPHON_CONFIG (Psiphon config, JSON or base64) is embedded encrypted with it (config "hiddify").
+EMBED_LDFLAGS=
+ifneq ($(strip $(HIDDIFY_SECRET_KEY)),)
+EMBED_LDFLAGS+=-X github.com/sagernet/sing-box/hiddify/secret.Key=$(strip $(HIDDIFY_SECRET_KEY))
+ifneq ($(strip $(PSIPHON_CONFIG)),)
+PSIPHON_CONFIG_ENCRYPTED:=$(shell go run ./cmd/internal/encryptconfig)
+ifeq ($(PSIPHON_CONFIG_ENCRYPTED),)
+$(error failed to encrypt PSIPHON_CONFIG)
+endif
+EMBED_LDFLAGS+=-X github.com/sagernet/sing-box/protocol/psiphon.embeddedHiddifyConfig=$(PSIPHON_CONFIG_ENCRYPTED)
+endif
+endif
+LDFLAGS=-w -s -checklinkname=0 -buildid= $${CODE_VERSION} $(EMBED_LDFLAGS)
 GOBUILDLIB=CGO_ENABLED=1 go build -trimpath -ldflags="$(LDFLAGS)" -buildmode=c-shared
 GOBUILDSRV=CGO_ENABLED=1 go build -ldflags="$(LDFLAGS)" -trimpath -tags $(TAGS)
 
@@ -72,7 +85,7 @@ webui:
 .PHONY: build
 windows-amd64: prepare
 	rm -rf $(BINDIR)/*
-	go run -v "github.com/sagernet/cronet-go/cmd/build-naive@$(CRONET_GO_VERSION)" extract-lib --target windows/amd64 -o $(BINDIR)/
+	$(MAKE) BINDIR=$(BINDIR) fetch-libcronet-windows_amd64.dll
 	env GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc  $(GOBUILDLIB) -tags $(TAGS),$(WINDOWS_ADD_TAGS)   -o $(BINDIR)/$(LIBNAME).dll ./platform/desktop
 	echo "core built, now building cli" 
 	ls -R $(BINDIR)/
@@ -82,8 +95,8 @@ windows-amd64: prepare
 	$$(go env GOPATH)/bin/rsrc -ico ./assets/hiddify-cli.ico -o ./cmd/bydll/cli.syso ||echo "rsrc error in syso"
 	env GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc CGO_LDFLAGS="$(LIBNAME).dll" $(GOBUILDSRV) -o $(BINDIR)/$(CLINAME).exe ./cmd/bydll
 	rm ./*.dll
-	if [ ! -f $(BINDIR)/$(LIBNAME).dll -o ! -f $(BINDIR)/$(CLINAME).exe ]; then \
-		echo "Error: $(LIBNAME).dll or $(CLINAME).exe not built"; \
+	if [ ! -f $(BINDIR)/$(LIBNAME).dll -o ! -f $(BINDIR)/$(CLINAME).exe -o ! -f $(BINDIR)/libcronet.dll ]; then \
+		echo "Error: $(LIBNAME).dll, $(CLINAME).exe or libcronet.dll missing"; \
 		exit 1; \
 	fi
 
@@ -91,6 +104,18 @@ windows-amd64: prepare
 	
 
 
+
+# Prebuilt libcronet from cronet-go's lib/<os>_<arch>/ (same as upstream sing-box CI).
+# Usage: make fetch-libcronet-windows_amd64.dll
+fetch-libcronet-%:
+	rm -rf $(BINDIR)/.cronet-go-lib
+	git init -q $(BINDIR)/.cronet-go-lib
+	git -C $(BINDIR)/.cronet-go-lib remote add origin https://github.com/sagernet/cronet-go.git
+	git -C $(BINDIR)/.cronet-go-lib sparse-checkout set --no-cone "/lib/$(basename $*)/libcronet$(suffix $*)"
+	git -C $(BINDIR)/.cronet-go-lib fetch -q --depth=1 --filter=blob:none origin $(CRONET_GO_VERSION)
+	git -C $(BINDIR)/.cronet-go-lib checkout -q FETCH_HEAD
+	cp $(BINDIR)/.cronet-go-lib/lib/$(basename $*)/libcronet$(suffix $*) $(BINDIR)/
+	rm -rf $(BINDIR)/.cronet-go-lib
 
 cronet-%:
 	$(MAKE) ARCH=$* build-cronet
@@ -166,9 +191,9 @@ linux-custom: prepare  install_cronet
 	make webui
 
 macos-amd64:
-	env GOOS=darwin GOARCH=amd64 CGO_CFLAGS="-mmacosx-version-min=10.11 -O2" CGO_LDFLAGS="-mmacosx-version-min=10.11 -O2 -lpthread" CGO_ENABLED=1 go build -trimpath -tags $(TAGS),$(MACOS_ADD_TAGS) -buildmode=c-shared -o $(BINDIR)/$(LIBNAME)-amd64.dylib ./platform/desktop
+	env GOOS=darwin GOARCH=amd64 CGO_CFLAGS="-mmacosx-version-min=10.11 -O2" CGO_LDFLAGS="-mmacosx-version-min=10.11 -O2 -lpthread" CGO_ENABLED=1 go build -trimpath -ldflags="$(EMBED_LDFLAGS)" -tags $(TAGS),$(MACOS_ADD_TAGS) -buildmode=c-shared -o $(BINDIR)/$(LIBNAME)-amd64.dylib ./platform/desktop
 macos-arm64:
-	env GOOS=darwin GOARCH=arm64 CGO_CFLAGS="-mmacosx-version-min=10.11 -O2" CGO_LDFLAGS="-mmacosx-version-min=10.11 -O2 -lpthread" CGO_ENABLED=1 go build -trimpath -tags $(TAGS),$(MACOS_ADD_TAGS) -buildmode=c-shared -o $(BINDIR)/$(LIBNAME)-arm64.dylib ./platform/desktop
+	env GOOS=darwin GOARCH=arm64 CGO_CFLAGS="-mmacosx-version-min=10.11 -O2" CGO_LDFLAGS="-mmacosx-version-min=10.11 -O2 -lpthread" CGO_ENABLED=1 go build -trimpath -ldflags="$(EMBED_LDFLAGS)" -tags $(TAGS),$(MACOS_ADD_TAGS) -buildmode=c-shared -o $(BINDIR)/$(LIBNAME)-arm64.dylib ./platform/desktop
 	
 macos: prepare macos-amd64 macos-arm64 
 	

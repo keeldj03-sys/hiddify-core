@@ -5,7 +5,6 @@ import (
 
 	C "github.com/sagernet/sing-box/constant"
 	"github.com/sagernet/sing-box/option"
-	dns "github.com/sagernet/sing-dns"
 )
 
 // Rule-set sources. The Hiddify repository hosts block lists and per-country
@@ -16,6 +15,13 @@ const (
 	singGeositeBase = "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/"
 	singGeoipBase   = "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/"
 )
+
+// dnsRCodeRefused is the DNS response code "REFUSED" (5).
+//
+// It is spelled out here instead of taken from github.com/sagernet/sing-dns:
+// that module is built against an older sing, and its API does not match the
+// one this core uses.
+const dnsRCodeRefused = 5
 
 // countries hosted at <hiddifyGeoBase>country/.
 var hiddifyGeoCountries = map[string]struct{}{
@@ -145,7 +151,7 @@ func (r *Rule) MakeDNSRule(tags []string) (rule option.DefaultDNSRule, ok bool) 
 	case Outbound_direct, Outbound_direct_with_fragment:
 		action.RouteOptions = option.DNSRouteActionOptions{Server: DNSMultiDirectTag}
 	case Outbound_block:
-		rcode := option.DNSRCode(dns.RCodeRefused)
+		rcode := option.DNSRCode(dnsRCodeRefused)
 		action = option.DNSRuleAction{
 			Action: C.RuleActionTypePredefined,
 			PredefinedOptions: option.DNSRouteActionPredefined{
